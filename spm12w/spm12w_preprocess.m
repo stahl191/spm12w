@@ -6,7 +6,7 @@ function spm12w_preprocess(varargin)
 % sid:            Subject ID of subject to be preprocessed (e.g., 's01')
 %
 % parameter_file: File specifying the parameters for preprocessing (e.g.,
-%                 'p_tutorial.m'). If the path is left unspecified, 
+%                 'p_tutorial.m'). If the full path is left unspecified, 
 %                 spm12w_preprocess will look in the scripts directory.
 %                 <optional>
 %
@@ -183,20 +183,36 @@ if p.slicetime
     spm12w_logger('msg',p.niceline, 'level',p.loglevel)
     spm12w_logger('msg',sprintf('Slice time correction on subject: %s', p.sid),...
                  'level',p.loglevel)    
-    % Load epi files
-    epifiles = cell(1,p.nses);
-    for ses = 1:p.nses
-        epifile = sprintf('%s_r%02d.nii',p.fmri,ses);
-        epifiles{ses} = fullfile(p.datadir,epifile);
-    end  
-    % Perform slice time correction
-    spm12w_logger('msg',sprintf('Reference slice: %d', p.refslice), ...
-                  'level',p.loglevel)  
-    spm12w_logger('msg',sprintf('Slice time acquisition order: %s', ...
-                  mat2str(p.sliceorder)), 'level',p.loglevel)                
-    TA = p.tr-p.tr/p.nslice;    
-    spm_slice_timing(epifiles,p.sliceorder,p.refslice, ...
-                      [TA/(p.nslice-1) p.tr-TA]);
+    % Slice time correction now allows matching of sessions with different TRs
+    % This complicates things as we have to run slicetime correction
+    % everytime we detect a new TR. Number of sessions = unique(p.tr).
+    for tr = num2cell(unique(p.tr))
+        % custom log message for the rare case when unique(p.tr) > 1
+        if length(unique(p.tr)) > 1
+            spm12w_logger('msg',sprintf(['Slice time correction for sessions ',...
+                      'with tr: %.1f'], tr{1}),'level',p.loglevel)
+        end
+        % Load epi files for files corresponding to the current unique tr      
+        epifiles = cell(1,sum(ismember(p.tr,tr{1})));
+        epi_i = 1;
+        for ses = 1:p.nses
+            if p.tr(ses) == tr{1} 
+                epifile = sprintf('%s_r%02d.nii',p.fmri,ses);
+                epifiles{epi_i} = fullfile(p.datadir,epifile);
+                epi_i = epi_i + 1;
+            end
+        end  
+        % Perform slice time correction
+        spm12w_logger('msg',sprintf('TR for current sessions: %.1f', tr{1}), ...
+                     'level',p.loglevel)  
+        spm12w_logger('msg',sprintf('Reference slice: %d', p.refslice), ...
+                     'level',p.loglevel)  
+        spm12w_logger('msg',sprintf('Slice time acquisition order: %s', ...
+                      mat2str(p.sliceorder)), 'level',p.loglevel)                
+        TA = tr{1}-tr{1}/p.nslice;    
+        spm_slice_timing(epifiles,p.sliceorder,p.refslice, ...
+                        [TA/(p.nslice-1) tr{1}-TA]);                     
+    end    
     spm12w_logger('msg','Slice time correction complete...', 'level',p.loglevel)
     p.fmri = ['a',p.fmri];
 end
@@ -455,6 +471,7 @@ if ~strcmp(p.normalize, 'none')
                   'level',p.loglevel)  
             job.subj.def = def_fname.def; % the estimated deformation name
             job.subj.resample = {sprintf('%s,1',anat)}; % file to normalize
+            job.woptions.prefix = 'w'; %new to spm12_6685
             job.woptions.bb = p.boundbox;
             job.woptions.vox = p.avoxsize;    % voxelsize for anatomy
             job.woptions.interp = p.interp_w; % we love those big splines
@@ -533,7 +550,8 @@ if p.slices
     % or else we get focus stolen by slicenoise
     F = spm_figure('CreateWin','Graphics', 'spm12w preprocessing', 'off'); 
     spm12w_slicenoise('niifiles',epifiles,'radata',p.ra,'mask',p.mask, ...
-                      'psname','preprocess.ps','loglevel',p.loglevel);
+                      'psname','preprocess.ps','noiseth',p.noiseth,...
+                      'loglevel',p.loglevel);
     spm12w_logger('msg','Slice noise check complete...', 'level',p.loglevel) 
     % Print then close slice noise figure
     print(F, 'preprocess.ps', '-dpsc2','-painters','-append','-noui')
@@ -639,7 +657,11 @@ end
 
 % Convert multipage ps file to pdf using spm12w_ps2pdf.m
 spm12w_ps2pdf('ps_file',fullfile(p.datadir,'preprocess.ps'),...
-              'pdf_file',fullfile(p.datadir,[p.prep_name,'.pdf']));
+              'pdf_file',fullfile(p.datadir,[p.sid,'_',p.prep_name,'.pdf']));
+
+% Copy qa pdf to qa dir.
+copyfile(fullfile(p.datadir,[p.sid,'_',p.prep_name,'.pdf']), ...
+         fullfile(p.qadir,[p.sid,'_',p.prep_name,'.pdf']));
 
 % Save parameter structure to mat file
 save([p.prep_name,'.mat'],'p');
@@ -648,7 +670,7 @@ save([p.prep_name,'.mat'],'p');
 msglist{1} = p.niceline;
 msglist{2} = sprintf('Preprocessing complete on subject: %s',p.sid);
 msglist{3} = sprintf('Log file   : %s', fullfile(p.datadir, p.preplog));
-msglist{4} = sprintf('Figures    : %s', fullfile(p.datadir,[p.prep_name,'.pdf']));
+msglist{4} = sprintf('Figures    : %s', fullfile(p.datadir,[p.sid,'_',p.prep_name,'.pdf']));
 msglist{5} = sprintf('Parameters : %s', fullfile(p.datadir,[p.prep_name,'.mat']));
 if p.snr
     msglist{6} = sprintf('QA output  : %s', fullfile(p.qadir));

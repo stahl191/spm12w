@@ -6,7 +6,7 @@ function spm12w_glm_compute(varargin)
 % sid:      Subject ID of subject for glm computation (e.g., 's01')
 %
 % glm_file: File specifying the parameters for glm design and contrasts
-%           (e.g., 'glm_tutorial.m'). If the path is left unspecified,
+%           (e.g., 'glm_tutorial.m'). If the full path is left unspecified,
 %           spm12w_glm will look in the scripts directory. <optional>
 %
 % spm12w_glm_compute will gather onset files and specify a design matrix 
@@ -79,12 +79,10 @@ else
 end
 
 % Show user the parameters we harvested.
-tmp_nvols = [];
-for i = 1:length(glm.nvols)
-    tmp_nvols = [tmp_nvols, sprintf('nvols(run%d)=%d, ',i,glm.nvols(1))];
+for ses = 1:glm.nses
+    spm12w_logger('msg', sprintf('Run:%d, nvols=%d, TR=%.1f', ses, ...
+                  glm.nvols(ses), glm.tr(ses)), 'level', glm.loglevel);
 end
-spm12w_logger('msg', sprintf('Runs:%d, tr=%.1f, %s', glm.nses, glm.tr, ...
-              tmp_nvols(1:end-2)), 'level', glm.loglevel)
 
 % Adjust nses & nvols to match modeled runs.
 if strcmp(glm.include_run,'all')
@@ -110,7 +108,21 @@ else
     % Adjust nses & nvols to match modeled runs.
     glm.nses = length(glm.include_run);
     glm.nvols = glm.nvols(glm.include_run);
+    % Assign TR to runs to be modeled
+    glm.tr = glm.tr(glm.include_run);
 end
+
+% Check that the runs to be modeled all have same TR
+if length(unique(glm.tr)) > 1
+    spm12w_logger('msg', sprintf(['[EXCEPTION] Runs to be modeled have ', ...
+              'different TRs (%s)'], sprintf('Run %.1f ',glm.tr)), ...
+              'level', glm.loglevel)
+    error('Modeled runs do not all have the same TR...')
+else
+    glm.tr = unique(glm.tr);
+end
+
+% Tell the user what we're up to...
 msg = sprintf('GLM will be calculated on runs: %s', ...
                sprintf('%d(nvols=%d) ',[glm.include_run;glm.nvols]));
 spm12w_logger('msg', msg, 'level', glm.loglevel)
@@ -200,7 +212,8 @@ if glm.design_only == 0
     % set a hidden figure to visible). 
     set(F,'visible','off');
     % Print looks better using opengl for design matrices. Keep an eye on
-    % this in case it fails on other platforms.
+    % this in case it fails on other platforms. opengl throws running in parfor
+    % but completed anyway.
     print(F, 'glm.ps', '-dpsc2','-opengl','-append','-noui') 
     
     % Demean design if user requested
